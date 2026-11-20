@@ -320,5 +320,51 @@ class ReviewTest(unittest.TestCase):
         self.assertIn("乙", text)
 
 
+class ParseSectionTest(unittest.TestCase):
+    SECTIONED = """@paper: 2023-A
+@year: 2023
+
+一、单项选择题（每题 2 分，共 4 分）
+1. 甲的题干( )
+A. 一 B. 二
+2. 乙的题干( )
+
+二、多项选择题（每题 3 分，共 3 分）
+1. 丙的题干( )
+
+三、简答题（10 分）
+简述丁。
+"""
+
+    def test_restart_numbering_gets_section_prefix(self):
+        paper = ledger.parse_paper_text(self.SECTIONED, "2023-A")
+        self.assertEqual([q["no"] for q in paper["questions"]], ["一.1", "一.2", "二.1", "三.1"])
+        self.assertEqual([q["score"] for q in paper["questions"]], [2, 2, 3, 10])
+
+    def test_continuous_numbering_keeps_plain(self):
+        text = """@paper: P1
+一、单项选择题（每题 2 分，共 4 分）
+1. 甲
+2. 乙
+二、多项选择题（每题 3 分，共 3 分）
+3. 丙
+"""
+        paper = ledger.parse_paper_text(text, "P1")
+        self.assertEqual([q["no"] for q in paper["questions"]], ["1", "2", "3"])
+        self.assertEqual([q["score"] for q in paper["questions"]], [2, 2, 3])
+
+    def test_own_score_beats_section_score(self):
+        text = """@paper: P1
+一、单项选择题（每题 2 分，共 4 分）
+1. 甲(5分)
+"""
+        paper = ledger.parse_paper_text(text, "P1")
+        self.assertEqual(paper["questions"][0]["score"], 5)
+
+    def test_duplicate_without_sections_raises(self):
+        with self.assertRaises(ValueError):
+            ledger.parse_paper_text("@paper: p\n1. 甲\n1. 乙\n", "p")
+
+
 if __name__ == "__main__":
     unittest.main()

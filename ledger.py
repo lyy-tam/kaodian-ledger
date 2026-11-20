@@ -25,7 +25,7 @@ import unicodedata
 from datetime import datetime
 from statistics import median
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 CORPUS_SCHEMA = "kaodian-ledger/corpus@1"
 LEDGER_SCHEMA = "kaodian-ledger/ledger@1"
@@ -42,6 +42,9 @@ TIER_DROP = "可放弃"
 Q_START = re.compile(r"^\s*(?:[\[【]\s*(\d{1,3})\s*[\]】]|(\d{1,3})\s*[.、．)）])\s*(.*)$")
 META_LINE = re.compile(r"^\s*@([A-Za-z_]+)\s*[:：]\s*(.*?)\s*$")
 SCORE_RE = re.compile(r"[（(\[【]\s*(\d+(?:\.\d+)?)\s*分\s*[)）\]】]")
+SECTION_LINE = re.compile(r"^\s*([一二三四五六七八九十]+)\s*[、.．]\s*(.*)$")
+PER_Q_SCORE = re.compile(r"每题\s*(\d+(?:\.\d+)?)\s*分")
+TOTAL_SCORE = re.compile(r"共\s*(\d+(?:\.\d+)?)\s*分")
 YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
 REASON_TEXT = {
@@ -203,32 +206,98 @@ def canonical_label(point, aliases):
 
 def parse_paper_text(text, fallback_id=None, year_hint=None):
     meta = {}
-    questions = []
-    current = None
+    sections = []
+    current_section = None
+    current_question = None
+    seen_question = False
+
+    def open_section(label, header):
+        section = {
+            "label": label,
+            "header": header,
+            "per_score": None,
+            "total_score": None,
+            "questions": [],
+            "intro": [],
+        }
+        match = PER_Q_SCORE.search(header)
+        if match is not None:
+            section["per_score"] = _num(match.group(1))
+        match = TOTAL_SCORE.search(header)
+        if match is not None:
+            section["total_score"] = _num(match.group(1))
+        else:
+            match = SCORE_RE.search(header)
+            if match is not None:
+                section["total_score"] = _num(match.group(1))
+        sections.append(section)
+        return section
+
     for line in text.splitlines():
         match = META_LINE.match(line)
-        if match is not None and current is None:
+        if match is not None and not sections and not seen_question:
             meta[match.group(1).lower()] = match.group(2).strip()
+            continue
+        match = SECTION_LINE.match(line)
+        if match is not None:
+            current_question = None
+            current_section = open_section(match.group(1), match.group(2).strip())
             continue
         match = Q_START.match(line)
         if match is not None:
             raw_no = match.group(1) if match.group(1) is not None else match.group(2)
-            current = {"no": str(int(raw_no)), "text": (match.group(3) or "").strip()}
-            questions.append(current)
+            if current_section is None:
+                current_section = open_section(None, "")
+            current_question = {"no": str(int(raw_no)), "text": (match.group(3) or "").strip()}
+            current_section["questions"].append(current_question)
+            seen_question = True
             continue
-        if current is not None:
-            current["text"] = (current["text"] + "\n" + line).strip()
+        if current_question is not None:
+            current_question["text"] = (current_question["text"] + "\n" + line).strip()
+        elif current_section is not None and line.strip():
+            current_section["intro"].append(line.strip())
+
+    # 有些大题(简答/论述)整段没有题号,收成一道题
+    for section in sections:
+        if section["questions"] or not section["label"] or not section["intro"]:
+            continue
+        block = "\n".join(section["intro"]).strip()
+        if block:
+            section["questions"].append({"no": "1", "text": block})
+
+    questions = []
+    for section in sections:
+        for question in section["questions"]:
+            match = SCORE_RE.search(question["text"])
+            if match is not None:
+                question["score"] = _num(match.group(1))
+            elif section["per_score"] is not None:
+                question["score"] = section["per_score"]
+            elif len(section["questions"]) == 1 and section["total_score"] is not None:
+                question["score"] = section["total_score"]
+            else:
+                question["score"] = None
+            question["section_label"] = section["label"]
+            questions.append(question)
+
     if not questions:
         raise ValueError("没有识别到题目(题号要写在行首,如 [1] 或 1.)")
+
+    # 分节卷里每节题号都从 1 开始,加节号前缀避免撞号
+    if len({question["no"] for question in questions}) != len(questions):
+        for question in questions:
+            label = question.get("section_label")
+            if label:
+                question["no"] = "%s.%s" % (label, question["no"])
+
     seen = set()
     for question in questions:
         if question["no"] in seen:
-            raise ValueError("题号重复: " + question["no"])
+            raise ValueError("题号重复: 同一卷里有两个相同的题号 " + question["no"])
         seen.add(question["no"])
         if not question["text"]:
             raise ValueError("第 %s 题题干为空" % question["no"])
-        match = SCORE_RE.search(question["text"])
-        question["score"] = _num(match.group(1)) if match else None
+
     paper_id = meta.get("paper") or fallback_id
     if not paper_id:
         raise ValueError("缺少卷号:写 @paper 或用文件名")
@@ -237,7 +306,10 @@ def parse_paper_text(text, fallback_id=None, year_hint=None):
         "paper_id": str(paper_id),
         "year": to_int(year),
         "subject": meta.get("subject"),
-        "questions": questions,
+        "questions": [
+            {"no": question["no"], "text": question["text"], "score": question["score"]}
+            for question in questions
+        ],
     }
 
 
