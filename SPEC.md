@@ -15,6 +15,7 @@
                                            sample --> samples.json --calibrate--> calibration.json
 
     模考实际考点 + ledger.json --coverage--> coverage.json / coverage.md   (⑦)
+    results.json --grade--> mistakes.json --review--> review.md              (⑥ 之后)
 
 ## 2 真题文本约定
 
@@ -130,7 +131,21 @@ quiz.json 里每道题必须挂 claim_id，且该 claim 必须已核实。这是
 - 未覆盖的点如果当初在存疑区（给不出出处），报告里会直接标出来——那正是反押题。
 - 阈值是人的判断，不是定律，可以调。
 
-## 10 已知边界
+## 10 错题回写与重测
+
+自测后把每题结果记成 results.json：
+
+    {"results": [{"claim_id": "c5", "q": 1, "ok": false}]}
+
+    python3 ledger.py grade --ledger out/ledger.json --results results.json --out out/mistakes.json
+    python3 ledger.py review out/ledger.json --mistakes out/mistakes.json --out out/review.md
+
+- claim_id 必须存在于 ledger，否则报错——防止 key 打错被静默吞掉。
+- 重复 grade 在原文件上累加；--no-merge 可以从零重来。
+- 重测优先级 = 该知识点分值 × (1 + 累计错次)，只对已核实结论排序。
+- 没测过的必背项单列：沉默不是掌握。
+
+## 11 已知边界
 
 - 出处真实 ≠ 结论正确。标注是否贴切，只有人核能判断（⑤ 就是干这个的）。
 - OCR 切题错误会让整卷错位，且很难自动发现。parse 后先看题数。

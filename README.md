@@ -51,6 +51,8 @@ flowchart LR
 | calibrate | 命中率低于阈值（默认 70%）→ 整体降级为「仅参考」 |
 | sheet | 自测题渲染成闭卷题面，答案单独放最后一页 |
 | coverage | 模考后算预测覆盖率；没覆盖的会标出当初在不在存疑区 |
+| grade | 自测结果回写 mistakes.json，重复跑会累加 |
+| review | 按「分值 × (1 + 错次)」出重测清单，没测过的必背项单列 |
 
 ## 5 分钟上手
 
@@ -118,6 +120,24 @@ parse 完先看题数——切错题会污染整个账本，而且很难自动�
 模考覆盖率（examples/actual-mock.json，6 个实际考点）：3/6 = 50%，低于 60% 阈值。
 没覆盖的三条——水温、水质硬度、研磨度——正好是当初存疑区里给不出出处的那三条：
 你当时标不出来的，考试真考了。报告会逐条标出来，不用自己对照。
+
+## 自测之后：错题回写
+
+sheet 做完，把每题结果记成 results.json：
+
+    {"results": [{"claim_id": "c5", "q": 1, "ok": false}]}
+
+    python3 ledger.py grade --ledger out/ledger.json --results examples/results-demo.json --out out/mistakes.json
+    python3 ledger.py review out/ledger.json --mistakes out/mistakes.json --out out/review.md
+
+重复 grade 会累加。重测优先级 = 分值 × (1 + 错次)，错得越多越靠前；
+从没测过的必背项单独列出来——沉默不等于掌握。
+
+| # | 知识点 | 档 | 出处 | 错/对 | 优先级 |
+|---:|---|---|---|---|---|
+| 1 | 处理法风味 | 必背 | 2023-A#4; 2024-A#4 | 1/1 | 12 |
+
+还没测过的必背项：牛奶发泡温度 | 2024-A#3; 2023-A#2
 
 ## 和旧录入稿的桥接
 

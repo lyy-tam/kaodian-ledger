@@ -25,13 +25,14 @@ import unicodedata
 from datetime import datetime
 from statistics import median
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 CORPUS_SCHEMA = "kaodian-ledger/corpus@1"
 LEDGER_SCHEMA = "kaodian-ledger/ledger@1"
 SAMPLE_SCHEMA = "kaodian-ledger/samples@1"
 CALIB_SCHEMA = "kaodian-ledger/calibration@1"
 COVERAGE_SCHEMA = "kaodian-ledger/coverage@1"
+MISTAKES_SCHEMA = "kaodian-ledger/mistakes@1"
 QUIZ_SCHEMA = "kaodian-ledger/quiz@1"
 
 TIER_MUST = "必背"
@@ -933,6 +934,146 @@ def cmd_coverage(args):
     print("-> " + str(args.out))
 
 
+# ---------------------------------------------------------------- 错题与重测
+
+def grade_results(claims_by_id, results, previous=None):
+    items = {}
+    for item in (previous or {}).get("items") or []:
+        cid = str(item.get("claim_id") or "").strip()
+        if not cid:
+            continue
+        items[cid] = {
+            "claim_id": cid,
+            "point": str(item.get("point") or ""),
+            "wrong": int(item.get("wrong") or 0),
+            "right": int(item.get("right") or 0),
+            "last_result": str(item.get("last_result") or ""),
+        }
+    for result in results:
+        cid = str(result.get("claim_id") or "").strip()
+        if cid not in claims_by_id:
+            raise ValueError("results.json 里的 claim_id %s 不在 ledger 里" % (cid or "(空)"))
+        ok = result.get("ok")
+        if not isinstance(ok, bool):
+            raise ValueError("%s 的 ok 必须是 true / false(布尔值)" % cid)
+        entry = items.setdefault(cid, {
+            "claim_id": cid,
+            "point": str(claims_by_id[cid].get("point") or ""),
+            "wrong": 0,
+            "right": 0,
+            "last_result": "",
+        })
+        if ok:
+            entry["right"] += 1
+        else:
+            entry["wrong"] += 1
+        entry["last_result"] = "right" if ok else "wrong"
+    return items
+
+
+def cmd_grade(args):
+    ledger = load_json(args.ledger)
+    document = load_json(args.results)
+    results = document.get("results") if isinstance(document, dict) else None
+    if not isinstance(results, list) or not results:
+        die("results.json 里要有 results 数组")
+    claims_by_id = {claim["id"]: claim for claim in (ledger.get("claims") or [])}
+    previous = None
+    if args.merge and pathlib.Path(args.out).is_file():
+        previous = load_json(args.out)
+    try:
+        items = grade_results(claims_by_id, results, previous)
+    except ValueError as exc:
+        die(exc)
+    ordered = sorted(items.values(), key=lambda item: (-item["wrong"], -item["right"], item["point"]))
+    write_json(args.out, {"schema": MISTAKES_SCHEMA, "generated_at": now(), "items": ordered})
+    wrong = sum(item["wrong"] for item in ordered)
+    right = sum(item["right"] for item in ordered)
+    print("记录: %d 道题结果;累计错 %d / 对 %d,涉及 %d 个知识点" % (
+        len(results), wrong, right, len(ordered)))
+    print("-> " + str(args.out))
+
+
+def review_plan(rows, items, aliases=None):
+    by_point = {}
+    for row in rows:
+        by_point[canonical_key(row["point"], aliases)] = row
+    measured = {}
+    for item in items or []:
+        key = canonical_key(item.get("point"), aliases)
+        entry = measured.setdefault(key, {"point": item.get("point") or "", "wrong": 0, "right": 0})
+        entry["wrong"] += int(item.get("wrong") or 0)
+        entry["right"] += int(item.get("right") or 0)
+    hits = []
+    for key, entry in measured.items():
+        row = by_point.get(key)
+        if row is None:
+            continue
+        hits.append({
+            "point": row["point"],
+            "tier": row["tier"],
+            "refs": row["refs"],
+            "weight": row["weight"],
+            "wrong": entry["wrong"],
+            "right": entry["right"],
+            "priority": row["weight"] * (1 + entry["wrong"]),
+        })
+    hits.sort(key=lambda hit: (-hit["priority"], -hit["wrong"], hit["point"]))
+    tested = set(measured)
+    untested = [row for key, row in by_point.items() if key not in tested and row["tier"] == TIER_MUST]
+    untested.sort(key=lambda row: -row["weight"])
+    return {
+        "rows": hits,
+        "untested": untested,
+        "wrong_points": sum(1 for hit in hits if hit["wrong"] > 0),
+        "measured_points": len(measured),
+    }
+
+
+def render_review(plan):
+    lines = ["# 重测清单", ""]
+    lines.append("- 已测 %d 个知识点,其中 %d 个错过" % (plan["measured_points"], plan["wrong_points"]))
+    lines.append("- 排序: 分值 × (1 + 错次),错得越多越靠前")
+    lines.append("")
+    lines.append("| # | 知识点 | 档 | 出处 | 错/对 | 优先级 |")
+    lines.append("|---:|---|---|---|---|---|")
+    if plan["rows"]:
+        for index, row in enumerate(plan["rows"], 1):
+            refs = "; ".join("%s#%s" % (ref["paper"], ref["no"]) for ref in row["refs"])
+            lines.append("| %d | %s | %s | %s | %d/%d | %s |" % (
+                index, cell(row["point"]), row["tier"], cell(refs),
+                row["wrong"], row["right"], fmt_num(round(row["priority"], 2))))
+    else:
+        lines.append("| - | 还没有记录任何自测结果 | - | - | - | - |")
+    lines.append("")
+    lines.append("## 还没测过的必背项")
+    lines.append("")
+    if not plan["untested"]:
+        lines.append("无。")
+    else:
+        for row in plan["untested"]:
+            refs = "; ".join("%s#%s" % (ref["paper"], ref["no"]) for ref in row["refs"])
+            lines.append("- %s | %s" % (row["point"], refs))
+    lines.append("")
+    lines.append("先把错过的清掉,再上新题。重测仍然闭卷,别先看答案。")
+    return "\n".join(lines) + "\n"
+
+
+def cmd_review(args):
+    ledger = load_json(args.ledger)
+    mistakes_path = pathlib.Path(args.mistakes)
+    if not mistakes_path.is_file():
+        die("找不到错题记录: " + str(mistakes_path))
+    mistakes = load_json(mistakes_path)
+    aliases = load_aliases(args.aliases)
+    rank = build_rank(ledger.get("claims") or [], top=args.top,
+                      must_pct=args.must_pct, under_pct=args.under_pct, aliases=aliases)
+    plan = review_plan(rank["rows"], mistakes.get("items") or [], aliases)
+    write_text(args.out, render_review(plan))
+    print("重测清单: %d 个错过的知识点,另有 %d 个必背项还没测 -> %s" % (
+        plan["wrong_points"], len(plan["untested"]), args.out))
+
+
 # ---------------------------------------------------------------- CLI
 
 def main(argv=None):
@@ -1005,6 +1146,23 @@ def main(argv=None):
     p.add_argument("--must-pct", type=float, default=30)
     p.add_argument("--under-pct", type=float, default=40)
     p.set_defaults(func=cmd_coverage)
+
+    p = sub.add_parser("grade", help="自测结果 -> mistakes.json")
+    p.add_argument("--ledger", required=True)
+    p.add_argument("--results", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--no-merge", dest="merge", action="store_false")
+    p.set_defaults(func=cmd_grade)
+
+    p = sub.add_parser("review", help="错题 + 账本 -> 重测清单")
+    p.add_argument("ledger")
+    p.add_argument("--mistakes", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--aliases", default=None)
+    p.add_argument("--top", type=int, default=20)
+    p.add_argument("--must-pct", type=float, default=30)
+    p.add_argument("--under-pct", type=float, default=40)
+    p.set_defaults(func=cmd_review)
 
     args = parser.parse_args(argv)
     return args.func(args)

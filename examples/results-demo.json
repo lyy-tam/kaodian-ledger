@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "claim_id": "c5",
+      "q": 1,
+      "ok": false
+    },
+    {
+      "claim_id": "c5",
+      "q": 2,
+      "ok": true
+    }
+  ]
+}

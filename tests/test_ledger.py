@@ -259,5 +259,66 @@ class CoverageTest(unittest.TestCase):
         self.assertIn("模拟卷", text)
 
 
+class GradeTest(unittest.TestCase):
+    CLAIMS = {"c1": {"id": "c1", "point": "甲"}, "c2": {"id": "c2", "point": "乙"}}
+
+    def test_accumulate(self):
+        results = [
+            {"claim_id": "c1", "q": 1, "ok": False},
+            {"claim_id": "c1", "q": 2, "ok": True},
+            {"claim_id": "c2", "q": 1, "ok": True},
+        ]
+        items = ledger.grade_results(self.CLAIMS, results)
+        self.assertEqual(items["c1"]["wrong"], 1)
+        self.assertEqual(items["c1"]["right"], 1)
+        self.assertEqual(items["c1"]["last_result"], "right")
+        again = ledger.grade_results(self.CLAIMS, [{"claim_id": "c1", "q": 1, "ok": False}],
+                                     {"items": list(items.values())})
+        self.assertEqual(again["c1"]["wrong"], 2)
+        self.assertEqual(again["c1"]["right"], 1)
+
+    def test_unknown_claim_raises(self):
+        with self.assertRaises(ValueError):
+            ledger.grade_results({}, [{"claim_id": "c9", "ok": False}])
+
+    def test_non_bool_raises(self):
+        with self.assertRaises(ValueError):
+            ledger.grade_results({"c1": {"id": "c1", "point": "甲"}},
+                                 [{"claim_id": "c1", "ok": "yes"}])
+
+
+class ReviewTest(unittest.TestCase):
+    ROWS = [
+        {"point": "甲", "tier": "必背", "weight": 6.0,
+         "refs": [{"paper": "P1", "no": "1", "quote": "a"}]},
+        {"point": "乙", "tier": "必背", "weight": 5.0,
+         "refs": [{"paper": "P1", "no": "2", "quote": "b"}]},
+        {"point": "丙", "tier": "理解", "weight": 4.0,
+         "refs": [{"paper": "P1", "no": "3", "quote": "c"}]},
+    ]
+
+    def test_priority_order(self):
+        items = [
+            {"claim_id": "c1", "point": "甲", "wrong": 2, "right": 0},
+            {"claim_id": "c3", "point": "丙", "wrong": 1, "right": 0},
+        ]
+        plan = ledger.review_plan(self.ROWS, items)
+        self.assertEqual(plan["rows"][0]["point"], "甲")
+        self.assertEqual(plan["rows"][0]["priority"], 18)
+        self.assertEqual(plan["wrong_points"], 2)
+
+    def test_untested_only_must(self):
+        plan = ledger.review_plan(self.ROWS, [])
+        self.assertEqual(plan["rows"], [])
+        self.assertEqual([row["point"] for row in plan["untested"]], ["甲", "乙"])
+
+    def test_render_lists_misses_and_untested(self):
+        plan = ledger.review_plan(self.ROWS, [{"claim_id": "c1", "point": "甲", "wrong": 1, "right": 0}])
+        text = ledger.render_review(plan)
+        self.assertIn("重测清单", text)
+        self.assertIn("还没测过的必背项", text)
+        self.assertIn("乙", text)
+
+
 if __name__ == "__main__":
     unittest.main()
