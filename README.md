@@ -15,6 +15,27 @@ AI 划重点最大的风险不是漏，是编。没有出处的「高频考点�
 
 不碰 AI 的记忆，也不碰你的真题版权：仓库里没有任何真题，只有虚构的示例。
 
+## 七步落到命令上
+
+```mermaid
+flowchart LR
+  A[真题文本或旧 CSV] --> B[corpus.json]
+  M[AI 按 prompts 抽取] --> C[claims.json]
+  B --> D{check 出处对账}
+  C --> D
+  D -->|引文找得到| E[ledger.json]
+  D -->|找不到| X[存疑区]
+  E --> F[rank Top N 三档]
+  F --> G[sample 人核 3-5 条]
+  G --> H[calibrate 命中率]
+  H -->|低于阈值| R[整体降级为参考]
+  E --> I[sheet 闭卷自测]
+  F --> J[coverage 模考覆盖率]
+  J -->|覆盖偏低| K[回第 3 步重划]
+```
+
+③ 是 check，④ 是 rank，⑤ 是 sample + calibrate，⑥ 是 sheet，⑦ 是 coverage。
+
 ## 它做什么
 
 | 命令 | 作用 |
@@ -54,6 +75,25 @@ AI 划重点最大的风险不是漏，是编。没有出处的「高频考点�
 
     # 7. 模考后：实际考点按 examples/actual-mock.json 的格式写下来
     python3 ledger.py coverage out/ledger.json --actual examples/actual-mock.json --aliases examples/aliases.json --md out/coverage.md --out out/coverage.json
+
+## 怎么把真题喂进去
+
+按省事程度排：
+
+1. 粘贴：把题干纯文本按 SPEC 的格式整理，一卷一个 .txt，题号写在行首（[1] 或 1.）。
+2. 拍照 OCR：整页拍正、一页一张，先转文字再切题；公式和图多的科目别硬上。
+3. 旧 CSV：已有「年份,题号,题干原文,分值,知识点,原文摘录」的表，直接 import-csv。
+
+只有一个格式坑：题干里以「1.」开头的列表会被当成下一题，OCR 后统一改成 [1]。
+parse 完先看题数——切错题会污染整个账本，而且很难自动发现。
+
+## 提示词三件套
+
+- prompts/extract.md：只准用你给的材料，每条结论必须带逐字引文和题号；算不出的进 absent。
+- prompts/quiz.md：每个必背项 2 道闭卷题，回忆型 + 迁移型，答案和题面分开。
+- prompts/capability-mode.md：能力型科目换成题型分析，不押知识点、不给概率。
+
+三份都是「贴进去就能用」的整段，不绑定特定模型。
 
 ## 跑出来长什么样
 
