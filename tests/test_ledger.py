@@ -193,5 +193,71 @@ class ReportTest(unittest.TestCase):
         self.assertIn("尚未做人工校准", text)
 
 
+class AliasTest(unittest.TestCase):
+    ALIASES = {
+        "keys": {"奶泡温度": "牛奶发泡温度", "牛奶发泡温度": "牛奶发泡温度"},
+        "labels": {"牛奶发泡温度": "牛奶发泡温度"},
+    }
+
+    def test_rank_merges_synonyms(self):
+        claims = [
+            {"status": "verified", "point": "奶泡温度", "quote": "a", "score_used": 2,
+             "matched": {"paper": "P1", "no": "1"}},
+            {"status": "verified", "point": "牛奶发泡温度", "quote": "b", "score_used": 3,
+             "matched": {"paper": "P1", "no": "2"}},
+        ]
+        rank = ledger.build_rank(claims, top=10, aliases=self.ALIASES)
+        self.assertEqual(len(rank["rows"]), 1)
+        self.assertEqual(rank["rows"][0]["point"], "牛奶发泡温度")
+        self.assertEqual(rank["rows"][0]["count"], 2)
+        self.assertEqual(rank["rows"][0]["weight"], 5)
+
+    def test_load_aliases_file(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+            handle.write('{"牛奶发泡温度": ["奶泡温度"]}')
+            path = handle.name
+        aliases = ledger.load_aliases(path)
+        self.assertEqual(ledger.canonical_key("奶泡温度", aliases), ledger.norm("牛奶发泡温度"))
+        self.assertEqual(ledger.canonical_label("奶泡温度", aliases), "牛奶发泡温度")
+
+
+class CoverageTest(unittest.TestCase):
+    ROWS = [
+        {"point": "甲", "tier": "必背", "rank": 1},
+        {"point": "乙", "tier": "理解", "rank": 2},
+        {"point": "丙", "tier": "可放弃", "rank": 3},
+    ]
+
+    def test_hits_and_misses(self):
+        actual = [{"point": "甲", "ref": "m#1"}, {"point": "乙", "ref": "m#2"},
+                  {"point": "丁", "ref": "m#3"}]
+        result = ledger.coverage_analysis(self.ROWS, actual, threshold=0.5)
+        self.assertEqual(result["actual"], 3)
+        self.assertEqual(result["covered"], 2)
+        self.assertEqual(result["by_tier"]["必背"], 1)
+        self.assertEqual(result["by_tier"]["理解"], 1)
+        self.assertEqual(len(result["misses"]), 1)
+        self.assertEqual(result["status"], "ok")
+
+    def test_below_threshold_is_low(self):
+        result = ledger.coverage_analysis(self.ROWS, [{"point": "丁"}], threshold=0.6)
+        self.assertEqual(result["coverage"], 0.0)
+        self.assertEqual(result["status"], "low")
+
+    def test_miss_marked_in_doubt(self):
+        result = ledger.coverage_analysis(self.ROWS, [{"point": "丁", "ref": "m#3"}],
+                                          threshold=0.6, doubt_keys={ledger.norm("丁")})
+        self.assertTrue(result["misses"][0]["in_doubt"])
+
+    def test_render_lists_misses_and_doubt(self):
+        result = ledger.coverage_analysis(self.ROWS, [{"point": "丁", "ref": "m#3"}],
+                                          threshold=0.6, doubt_keys={ledger.norm("丁")})
+        text = ledger.render_coverage(result, "模拟卷")
+        self.assertIn("未覆盖", text)
+        self.assertIn("在存疑区", text)
+        self.assertIn("模拟卷", text)
+
+
 if __name__ == "__main__":
     unittest.main()

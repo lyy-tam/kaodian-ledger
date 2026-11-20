@@ -25,12 +25,13 @@ import unicodedata
 from datetime import datetime
 from statistics import median
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 CORPUS_SCHEMA = "kaodian-ledger/corpus@1"
 LEDGER_SCHEMA = "kaodian-ledger/ledger@1"
 SAMPLE_SCHEMA = "kaodian-ledger/samples@1"
 CALIB_SCHEMA = "kaodian-ledger/calibration@1"
+COVERAGE_SCHEMA = "kaodian-ledger/coverage@1"
 QUIZ_SCHEMA = "kaodian-ledger/quiz@1"
 
 TIER_MUST = "必背"
@@ -157,6 +158,44 @@ def _ref_text(claim):
     paper = matched.get("paper") or claim.get("paper") or claim.get("year") or "?"
     no = matched.get("no") or claim.get("no") or "?"
     return "%s#%s" % (paper, no)
+
+
+def load_aliases(path):
+    """合并表: {规范名: [同义写法, ...]}。不给文件就返回空表。"""
+    if not path:
+        return {"keys": {}, "labels": {}}
+    target = pathlib.Path(path)
+    if not target.is_file():
+        die("找不到合并表: " + str(target))
+    document = load_json(target)
+    if not isinstance(document, dict):
+        die("aliases.json 必须是 {规范名: [同义写法...]} 的对象")
+    keys = {}
+    labels = {}
+    for canonical, variants in document.items():
+        canonical_key_text = norm(canonical)
+        if not canonical_key_text:
+            continue
+        keys[canonical_key_text] = canonical_key_text
+        labels[canonical_key_text] = str(canonical)
+        if isinstance(variants, str):
+            variants = [variants]
+        for variant in variants or []:
+            variant_key = norm(variant)
+            if variant_key:
+                keys[variant_key] = canonical_key_text
+    return {"keys": keys, "labels": labels}
+
+
+def canonical_key(point, aliases):
+    key = norm(point)
+    return (aliases or {}).get("keys", {}).get(key, key)
+
+
+def canonical_label(point, aliases):
+    key = canonical_key(point, aliases)
+    labels = (aliases or {}).get("labels", {})
+    return labels.get(key, point or "")
 
 
 # ---------------------------------------------------------------- 入库
@@ -477,7 +516,7 @@ def cmd_check(args):
 
 # ---------------------------------------------------------------- 排序
 
-def build_rank(claims, top=20, must_pct=30, under_pct=40):
+def build_rank(claims, top=20, must_pct=30, under_pct=40, aliases=None):
     verified = [c for c in claims if c.get("status") == "verified"]
     known = {}
     for claim in verified:
@@ -489,10 +528,10 @@ def build_rank(claims, top=20, must_pct=30, under_pct=40):
 
     groups = {}
     for claim in verified:
-        key = norm(claim.get("point"))
+        key = canonical_key(claim.get("point"), aliases)
         if not key:
             continue
-        group = groups.setdefault(key, {"point": claim.get("point") or "", "refs": []})
+        group = groups.setdefault(key, {"point": canonical_label(claim.get("point"), aliases), "refs": []})
         ref = {
             "paper": claim["matched"]["paper"],
             "no": claim["matched"]["no"],
@@ -630,8 +669,9 @@ def render_report(rank, ledger, calibration=None):
 def cmd_rank(args):
     ledger = load_json(args.ledger)
     calibration = load_json(args.calibration) if args.calibration else None
+    aliases = load_aliases(getattr(args, "aliases", None))
     rank = build_rank(ledger.get("claims") or [], top=args.top,
-                      must_pct=args.must_pct, under_pct=args.under_pct)
+                      must_pct=args.must_pct, under_pct=args.under_pct, aliases=aliases)
     write_text(args.out, render_report(rank, ledger, calibration))
     counts = {TIER_MUST: 0, TIER_UNDER: 0, TIER_DROP: 0}
     for row in rank["rows"]:
@@ -670,8 +710,9 @@ def calibrate_decision(items, threshold=0.7):
 
 def cmd_sample(args):
     ledger = load_json(args.ledger)
+    aliases = load_aliases(getattr(args, "aliases", None))
     rank = build_rank(ledger.get("claims") or [], top=args.top,
-                      must_pct=args.must_pct, under_pct=args.under_pct)
+                      must_pct=args.must_pct, under_pct=args.under_pct, aliases=aliases)
     rows = rank["rows"]
     if not rows:
         die("没有可核实的结论,先对账")
@@ -785,6 +826,113 @@ def cmd_sheet(args):
         len(quiz["quizzes"]), total, args.out))
 
 
+# ---------------------------------------------------------------- 模考覆盖率
+
+def coverage_analysis(rows, actual_points, threshold=0.6, aliases=None, doubt_keys=None):
+    predicted = {}
+    for row in rows:
+        predicted[canonical_key(row.get("point"), aliases)] = row
+    hits = []
+    misses = []
+    by_tier = {TIER_MUST: 0, TIER_UNDER: 0, TIER_DROP: 0}
+    for item in actual_points:
+        if isinstance(item, dict):
+            point = str(item.get("point") or "")
+            ref = str(item.get("ref") or "")
+        else:
+            point = str(item)
+            ref = ""
+        if not norm(point):
+            continue
+        key = canonical_key(point, aliases)
+        row = predicted.get(key)
+        if row is None:
+            misses.append({
+                "point": point,
+                "ref": ref,
+                "in_doubt": bool(doubt_keys and key in doubt_keys),
+            })
+            continue
+        by_tier[row["tier"]] += 1
+        hits.append({"point": point, "ref": ref, "tier": row["tier"], "matched": row["point"]})
+    total = len(hits) + len(misses)
+    covered = len(hits)
+    rate = covered / total if total else 0.0
+    return {
+        "actual": total,
+        "covered": covered,
+        "coverage": round(rate, 4),
+        "threshold": threshold,
+        "status": "ok" if rate + 1e-9 >= threshold else "low",
+        "by_tier": by_tier,
+        "hits": hits,
+        "misses": misses,
+    }
+
+
+def render_coverage(coverage, exam):
+    lines = ["# 模考覆盖率", ""]
+    lines.append("- 模考: " + (exam or "未命名"))
+    lines.append("- 实际考点 %d 个,命中 %d,覆盖率 %s(阈值 %s)" % (
+        coverage["actual"], coverage["covered"], _pct(coverage["coverage"]),
+        _pct(coverage["threshold"])))
+    if coverage["status"] == "ok":
+        lines.append("- 结论: 达标。按原表继续,重点放在自测和补漏。")
+    else:
+        lines.append("- 结论: 偏低。回到第 3 步重划重点,不要在原表上加码背。")
+    lines.append("- 分档: 必背 %d / 理解 %d / 可放弃 %d / 未预测 %d" % (
+        coverage["by_tier"][TIER_MUST], coverage["by_tier"][TIER_UNDER],
+        coverage["by_tier"][TIER_DROP], len(coverage["misses"])))
+    lines.append("")
+    lines.append("| 实际考点 | 出处 | 落在哪档 | 对应预测 |")
+    lines.append("|---|---|---|---|")
+    for hit in coverage["hits"]:
+        lines.append("| %s | %s | %s | %s |" % (
+            cell(hit["point"]), cell(hit["ref"]), hit["tier"], cell(hit["matched"])))
+    lines.append("")
+    lines.append("## 未覆盖")
+    lines.append("")
+    if not coverage["misses"]:
+        lines.append("无。")
+    else:
+        for miss in coverage["misses"]:
+            tag = " (当时在存疑区:给不出出处)" if miss.get("in_doubt") else ""
+            lines.append("- %s | %s%s" % (miss["point"], miss["ref"], tag))
+        lines.append("")
+        lines.append("这些点要么补出处重划,要么就是反押题。别用「超纲」两个字糊过去。")
+    return "\n".join(lines) + "\n"
+
+
+def cmd_coverage(args):
+    ledger = load_json(args.ledger)
+    document = load_json(args.actual)
+    aliases = load_aliases(getattr(args, "aliases", None))
+    points = document.get("points") if isinstance(document, dict) else None
+    if not isinstance(points, list) or not points:
+        die("actual.json 里要有 points 数组")
+    rank = build_rank(ledger.get("claims") or [], top=args.top,
+                      must_pct=args.must_pct, under_pct=args.under_pct, aliases=aliases)
+    doubt_keys = set()
+    for claim in ledger.get("claims") or []:
+        if claim.get("status") != "verified":
+            doubt_keys.add(canonical_key(claim.get("point"), aliases))
+    for item in ledger.get("absent") or []:
+        doubt_keys.add(canonical_key(item.get("point"), aliases))
+    result = coverage_analysis(rank["rows"], points, threshold=args.threshold,
+                               aliases=aliases, doubt_keys=doubt_keys)
+    result["schema"] = COVERAGE_SCHEMA
+    result["generated_at"] = now()
+    result["exam"] = str(document.get("exam") or "")
+    write_json(args.out, result)
+    if args.md:
+        write_text(args.md, render_coverage(result, result["exam"]))
+    print("覆盖率: %d/%d = %s(阈值 %s)-> %s" % (
+        result["covered"], result["actual"], _pct(result["coverage"]),
+        _pct(result["threshold"]),
+        "达标" if result["status"] == "ok" else "偏低,回第 3 步重划"))
+    print("-> " + str(args.out))
+
+
 # ---------------------------------------------------------------- CLI
 
 def main(argv=None):
@@ -820,6 +968,7 @@ def main(argv=None):
     p.add_argument("--must-pct", type=float, default=30)
     p.add_argument("--under-pct", type=float, default=40)
     p.add_argument("--calibration", default=None)
+    p.add_argument("--aliases", default=None)
     p.set_defaults(func=cmd_rank)
 
     p = sub.add_parser("sample", help="随机抽 3-5 条生成人工核对表")
@@ -829,6 +978,7 @@ def main(argv=None):
     p.add_argument("--top", type=int, default=20)
     p.add_argument("--must-pct", type=float, default=30)
     p.add_argument("--under-pct", type=float, default=40)
+    p.add_argument("--aliases", default=None)
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_sample)
 
@@ -843,6 +993,18 @@ def main(argv=None):
     p.add_argument("--ledger", required=True)
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_sheet)
+
+    p = sub.add_parser("coverage", help="模考实际考点 -> 覆盖率")
+    p.add_argument("ledger")
+    p.add_argument("--actual", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--md", default=None)
+    p.add_argument("--aliases", default=None)
+    p.add_argument("--threshold", type=float, default=0.6)
+    p.add_argument("--top", type=int, default=20)
+    p.add_argument("--must-pct", type=float, default=30)
+    p.add_argument("--under-pct", type=float, default=40)
+    p.set_defaults(func=cmd_coverage)
 
     args = parser.parse_args(argv)
     return args.func(args)

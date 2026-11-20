@@ -1,4 +1,4 @@
-# 规范 · v0.1
+# 规范 · v0.2
 
 改数据格式先改这个文件。
 
@@ -13,6 +13,8 @@
     旧 CSV   --import-csv-->             >--check--> ledger.json --rank--> report.md
     AI 输出  --extract-----> claims.json /                    \
                                            sample --> samples.json --calibrate--> calibration.json
+
+    模考实际考点 + ledger.json --coverage--> coverage.json / coverage.md   (⑦)
 
 ## 2 真题文本约定
 
@@ -95,7 +97,8 @@
 - 排序：权重降序 → 次数降序 → 点名字典序。
 - 分档按 Top N 的行数切：必背 30%，理解 40%，其余可放弃（可调）。
   可放弃档仍要留 20–30% 时间兜底，专门应对反押题。
-- 归并只做字面归一，不做语义合并。同义词表要自己维护。
+- 归并：先按归一化后的字面合并；同义写法写进 aliases.json（{"规范名": ["写法", ...]}），
+  用 --aliases 传入，rank / sample / coverage 都用同一张表。没写进去的不会自动合并。
 
 ## 7 ⑤ 校准
 
@@ -111,7 +114,23 @@ quiz.json 里每道题必须挂 claim_id，且该 claim 必须已核实。这是
 重点表里有 20 条、自测题考了别的，这种错配由脚本拦掉。
 答案放在独立字段，sheet 渲染时强制排到最后。
 
-## 9 已知边界
+## 9 ⑦ 模考覆盖率
+
+模考后，把「实际考了什么」记成 actual.json：
+
+    {"exam": "2025 模拟卷", "points": [
+      {"point": "牛奶发泡温度", "ref": "2025-mock#3"}
+    ]}
+
+    python3 ledger.py coverage out/ledger.json --actual actual.json --md out/coverage.md --out out/coverage.json
+
+- 预测集 = report 的 Top N（学生真正看到的那张表），只含 status=verified 的结论。
+- 匹配用字面归一 + aliases.json。
+- 覆盖率 = 命中 / 实际考点数。低于阈值（默认 0.6）判为偏低，回第 3 步重划。
+- 未覆盖的点如果当初在存疑区（给不出出处），报告里会直接标出来——那正是反押题。
+- 阈值是人的判断，不是定律，可以调。
+
+## 10 已知边界
 
 - 出处真实 ≠ 结论正确。标注是否贴切，只有人核能判断（⑤ 就是干这个的）。
 - OCR 切题错误会让整卷错位，且很难自动发现。parse 后先看题数。
