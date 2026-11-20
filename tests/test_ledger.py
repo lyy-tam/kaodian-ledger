@@ -1,6 +1,9 @@
 import importlib.util
+import os
 import pathlib
+import tempfile
 import unittest
+import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("ledger", ROOT / "ledger.py")
@@ -364,6 +367,48 @@ A. 一 B. 二
     def test_duplicate_without_sections_raises(self):
         with self.assertRaises(ValueError):
             ledger.parse_paper_text("@paper: p\n1. 甲\n1. 乙\n", "p")
+
+
+class DocxTest(unittest.TestCase):
+    @staticmethod
+    def make_docx(path, paragraphs):
+        body = []
+        for text, numbered in paragraphs:
+            props = ""
+            if numbered:
+                props = ('<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>')
+            body.append('<w:p>%s<w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>' % (props, text))
+        xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+               '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+               '<w:body>' + "".join(body) + '</w:body></w:document>')
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("word/document.xml", xml)
+
+    def test_auto_numbering_and_misnumbered_option(self):
+        paragraphs = [
+            ("测试卷", False),
+            ("一、单项选择题（每题 2 分，共 4 分）", False),
+            ("甲的题干（）", True),
+            ("乙的题干（）", True),
+            ("二、多项选择题（每题 2 分，共 4 分）", False),
+            ("丙的题干（）", True),
+            ("2.A. 一 B. 二", False),
+            ("丁的题干（）", True),
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "试卷.docx")
+            self.make_docx(path, paragraphs)
+            paper = ledger.parse_paper_file(path)
+        self.assertEqual([q["no"] for q in paper["questions"]], ["一.1", "一.2", "二.1", "二.2"])
+        self.assertEqual([q["score"] for q in paper["questions"]], [2, 2, 2, 2])
+        self.assertIn("2.A. 一 B. 二", paper["questions"][2]["text"])
+
+    def test_bad_zip_raises(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "坏文件.docx")
+            pathlib.Path(path).write_text("not a zip", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                ledger.parse_paper_file(path)
 
 
 if __name__ == "__main__":

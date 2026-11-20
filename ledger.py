@@ -22,10 +22,12 @@ import random
 import re
 import sys
 import unicodedata
+import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime
 from statistics import median
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 CORPUS_SCHEMA = "kaodian-ledger/corpus@1"
 LEDGER_SCHEMA = "kaodian-ledger/ledger@1"
@@ -40,6 +42,9 @@ TIER_UNDER = "理解"
 TIER_DROP = "可放弃"
 
 Q_START = re.compile(r"^\s*(?:[\[【]\s*(\d{1,3})\s*[\]】]|(\d{1,3})\s*[.、．)）])\s*(.*)$")
+OPTION_LINE = re.compile(r"^\s*\d{1,3}\s*[.、．]\s*[A-D][.、．]")
+AUTO_MARK = chr(1)
+DOCX_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 META_LINE = re.compile(r"^\s*@([A-Za-z_]+)\s*[:：]\s*(.*?)\s*$")
 SCORE_RE = re.compile(r"[（(\[【]\s*(\d+(?:\.\d+)?)\s*分\s*[)）\]】]")
 SECTION_LINE = re.compile(r"^\s*([一二三四五六七八九十]+)\s*[、.．]\s*(.*)$")
@@ -204,6 +209,42 @@ def canonical_label(point, aliases):
 
 # ---------------------------------------------------------------- 入库
 
+def docx_to_text(path):
+    """.docx 转文本。Word 自动编号不在正文里，用 \x01 标出来交给 parser 合成题号。"""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            xml = archive.read("word/document.xml")
+    except (OSError, KeyError, zipfile.BadZipFile) as exc:
+        raise ValueError("读不了 .docx: %s" % exc)
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise ValueError("文档 XML 坏了: %s" % exc)
+    lines = []
+    for paragraph in root.iter(DOCX_NS + "p"):
+        text = "".join(node.text or "" for node in paragraph.iter(DOCX_NS + "t"))
+        numbered = False
+        props = paragraph.find(DOCX_NS + "pPr")
+        if props is not None:
+            num_props = props.find(DOCX_NS + "numPr")
+            if num_props is not None:
+                num_id = num_props.find(DOCX_NS + "numId")
+                if num_id is not None and num_id.get(DOCX_NS + "val") not in (None, "0"):
+                    numbered = True
+        lines.append((AUTO_MARK if numbered else "") + text)
+    return "\n".join(lines)
+
+
+def _next_number(section):
+    highest = 0
+    for question in section["questions"]:
+        try:
+            highest = max(highest, int(question["no"]))
+        except (TypeError, ValueError):
+            continue
+    return highest + 1
+
+
 def parse_paper_text(text, fallback_id=None, year_hint=None):
     meta = {}
     sections = []
@@ -234,6 +275,9 @@ def parse_paper_text(text, fallback_id=None, year_hint=None):
         return section
 
     for line in text.splitlines():
+        auto = line.startswith(AUTO_MARK)
+        if auto:
+            line = line[len(AUTO_MARK):]
         match = META_LINE.match(line)
         if match is not None and not sections and not seen_question:
             meta[match.group(1).lower()] = match.group(2).strip()
@@ -243,12 +287,22 @@ def parse_paper_text(text, fallback_id=None, year_hint=None):
             current_question = None
             current_section = open_section(match.group(1), match.group(2).strip())
             continue
+        # 选项行被误编号(如 "2.A. 骨膜 B. 骨质")时,归到上一题,不另起一题
+        if not auto and OPTION_LINE.match(line) and current_question is not None:
+            current_question["text"] = (current_question["text"] + "\n" + line).strip()
+            continue
         match = Q_START.match(line)
-        if match is not None:
-            raw_no = match.group(1) if match.group(1) is not None else match.group(2)
+        if match is not None or auto:
             if current_section is None:
                 current_section = open_section(None, "")
-            current_question = {"no": str(int(raw_no)), "text": (match.group(3) or "").strip()}
+            if match is not None:
+                raw_no = match.group(1) if match.group(1) is not None else match.group(2)
+                no = str(int(raw_no))
+                body = (match.group(3) or "").strip()
+            else:
+                no = str(_next_number(current_section))
+                body = line.strip()
+            current_question = {"no": no, "text": body}
             current_section["questions"].append(current_question)
             seen_question = True
             continue
@@ -315,10 +369,16 @@ def parse_paper_text(text, fallback_id=None, year_hint=None):
 
 def parse_paper_file(path):
     path = pathlib.Path(path)
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except OSError as exc:
-        raise ValueError("读不到文件: %s" % exc)
+    if path.suffix.lower() == ".docx":
+        try:
+            text = docx_to_text(path)
+        except ValueError as exc:
+            raise ValueError("%s: %s" % (path.name, exc))
+    else:
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise ValueError("读不到文件: %s" % exc)
     match = YEAR_RE.search(path.stem)
     year_hint = match.group(0) if match else None
     try:
@@ -328,12 +388,23 @@ def parse_paper_file(path):
 
 
 def cmd_parse(args):
-    directory = pathlib.Path(args.corpus_dir)
-    if not directory.is_dir():
-        die("不是目录: " + str(directory))
-    files = sorted([p for p in directory.iterdir() if p.suffix.lower() in (".txt", ".md")])
+    target = pathlib.Path(args.corpus_dir)
+    if target.is_file():
+        files = [target]
+    elif target.is_dir():
+        files = sorted([
+            item for item in target.iterdir()
+            if item.suffix.lower() in (".txt", ".md", ".docx")
+        ])
+        legacy = sorted(item for item in target.iterdir() if item.suffix.lower() == ".doc")
+        if legacy:
+            print("[注意] 跳过 %d 个老式 .doc(读不了,请在 WPS/Word 里另存为 .docx):" % len(legacy))
+            for item in legacy[:3]:
+                print("  " + item.name)
+    else:
+        die("找不到这个路径: " + str(target))
     if not files:
-        die("目录里没有 .txt / .md: " + str(directory))
+        die("没有可读的文件(.txt / .md / .docx): " + str(target))
     papers = []
     ids = set()
     for path in files:
