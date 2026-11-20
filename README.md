@@ -1,5 +1,7 @@
 # 考点账本 · kaodian-ledger
 
+[![test](https://github.com/lyy-tam/kaodian-ledger/actions/workflows/test.yml/badge.svg)](https://github.com/lyy-tam/kaodian-ledger/actions/workflows/test.yml)
+
 AI 划重点最大的风险不是漏，是编。没有出处的「高频考点」，你没法查，只能信。
 这个工具给每条重点加一道机械校验：它引用的那句话，必须能在你给的那套真题的那道题里
 被程序原样找到。找不到就进存疑区，而不是进你的复习清单。
