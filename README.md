@@ -193,4 +193,7 @@ prompt 谁都能复制。这个仓库真正带不走的是两个 JSON：corpus.j
 路线图见 [ROADMAP.md](ROADMAP.md)（[English](ROADMAP.en.md)）：下一步是内容完整性（答案字段、文本型 PDF）；
 向量检索不在计划里，理由写在里面。
 
+贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)：先跑测试，报解析问题时附最小复现文本；
+不接受向量检索、模型计数、云端上传。
+
 MIT License
