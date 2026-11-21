@@ -61,5 +61,50 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(state["questions"], 0)
 
 
+QUIZ = """{"quizzes": [{"claim_id": "c1", "questions": [
+  {"q": "问题一", "a": "答案一"},
+  {"q": "问题二", "a": "答案二"}
+]}]}"""
+
+
+class QuizTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = serve.Store(self.temp.name)
+        self.store.upload("P1.txt", PAPER.encode("utf-8"))
+        self.store.check(CLAIMS)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_requires_ledger(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = serve.Store(folder)
+            with self.assertRaises(ValueError):
+                store.quiz_view()
+
+    def test_set_quiz_and_grade(self):
+        view = self.store.set_quiz(QUIZ)
+        self.assertEqual(len(view["quizzes"]), 1)
+        self.assertEqual(view["quizzes"][0]["point"], "甲")
+        data = self.store.grade({"results": [
+            {"claim_id": "c1", "q": 1, "ok": False},
+            {"claim_id": "c1", "q": 2, "ok": True},
+        ]})
+        self.assertEqual(data["mistakes"]["items"][0]["wrong"], 1)
+        self.assertEqual(data["review"]["rows"][0]["point"], "甲")
+
+    def test_unverified_claim_rejected(self):
+        bad = '{"quizzes": [{"claim_id": "c3", "questions": [{"q": "q", "a": "a"}]}]}'
+        with self.assertRaises(ValueError):
+            self.store.set_quiz(bad)
+
+    def test_grade_accumulates(self):
+        self.store.set_quiz(QUIZ)
+        self.store.grade({"results": [{"claim_id": "c1", "q": 1, "ok": False}]})
+        data = self.store.grade({"results": [{"claim_id": "c1", "q": 1, "ok": False}]})
+        self.assertEqual(data["mistakes"]["items"][0]["wrong"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,12 @@
   .badge.bad { color: var(--bad); border-color: #5a2a26; }
   .badge.warn { color: var(--warn); border-color: #5a462a; }
   textarea { width: 100%; min-height: 150px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font: 13px/1.5 ui-monospace, monospace; }
+  .qcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+  .qtext { margin: 0 0 8px; }
+  .answer { color: var(--warn); font-size: 13px; margin-top: 8px; }
+  button.small { padding: 6px 12px; font-size: 13px; }
+  button.chosen-ok { border-color: var(--ok); color: var(--ok); }
+  button.chosen-bad { border-color: var(--bad); color: var(--bad); }
   #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #223042; color: var(--text); padding: 10px 16px; border-radius: 10px; opacity: 0; pointer-events: none; transition: opacity .2s; font-size: 14px; max-width: 86vw; }
   #toast.show { opacity: 1; }
   #toast.bad { background: #4a2320; }
@@ -56,6 +62,7 @@
   <button data-tab="corpus" class="active">题库</button>
   <button data-tab="check">对账</button>
   <button data-tab="report">出表</button>
+  <button data-tab="quiz">自测</button>
 </nav>
 <main>
   <section id="tab-corpus">
@@ -86,6 +93,21 @@
     </div>
     <p class="hint">只统计已经核实出处的结论；存疑区不进表。</p>
     <div id="report-result"></div>
+  </section>
+
+  <section id="tab-quiz" hidden>
+    <p class="hint">用 prompts/quiz.md 让模型按「必背」项出题，把 quiz.json 贴进来。先做题，再看答案。</p>
+    <textarea id="quiz-input" placeholder='{"quizzes": [{"claim_id": "c1", "questions": [{"q": "题干", "a": "答案"}]}]}'></textarea>
+    <div class="row">
+      <button class="act primary" id="load-quiz">载入自测题</button>
+      <button class="act" id="quiz-example">填入示例题</button>
+      <button class="act" id="toggle-answers" hidden>显示 / 收起答案</button>
+      <button class="act primary" id="submit-grade" hidden>提交结果</button>
+    </div>
+    <div class="stat" id="quiz-stat"></div>
+    <div id="quiz-result"></div>
+    <h2>重测清单</h2>
+    <div id="review-result"></div>
   </section>
 </main>
 <div id="toast"></div>
@@ -220,13 +242,115 @@ function downloadReport() {
   URL.revokeObjectURL(url);
 }
 
+var localAnswers = {};
+
+function renderReview(data) {
+  var box = $("#review-result");
+  if (!data) {
+    box.innerHTML = "<p class='empty'>做完题、提交结果后，这里会按错次排重测清单。</p>";
+    return;
+  }
+  var html = "";
+  if (data.rows && data.rows.length) {
+    html += "<div class='tablewrap'><table><thead><tr><th>知识点</th><th>出处</th><th>错/对</th><th>优先级</th></tr></thead><tbody>";
+    html += data.rows.map(function (row) {
+      return "<tr><td>" + esc(row.point) + "</td><td>" + esc(row.refs) + "</td><td>" +
+        row.wrong + "/" + row.right + "</td><td>" + esc(row.priority) + "</td></tr>";
+    }).join("");
+    html += "</tbody></table></div>";
+  } else {
+    html += "<p class='empty'>还没有错题记录。</p>";
+  }
+  if (data.untested && data.untested.length) {
+    html += "<p class='hint'>还没测过的必背项：" +
+      data.untested.map(function (item) { return esc(item.point); }).join("、") + "</p>";
+  }
+  box.innerHTML = html;
+}
+
+function renderQuiz(data) {
+  var box = $("#quiz-result");
+  $("#toggle-answers").hidden = true;
+  $("#submit-grade").hidden = true;
+  $("#quiz-stat").textContent = "";
+  if (!data || !data.quizzes || !data.quizzes.length) {
+    box.innerHTML = "<p class='empty'>还没有自测题。先对账，再把 quiz.json 贴进来。</p>";
+    renderReview(data ? data.review : null);
+    return;
+  }
+  $("#toggle-answers").hidden = false;
+  $("#submit-grade").hidden = false;
+  var stats = [];
+  var html = "";
+  data.quizzes.forEach(function (item) {
+    stats.push(item.point + " " + item.questions.length + " 题");
+    html += "<h2>" + esc(item.point) + "</h2>";
+    item.questions.forEach(function (question, index) {
+      var key = item.claim_id + ":" + index;
+      html += "<div class='qcard' data-key='" + esc(key) + "'>" +
+        "<p class='qtext'>" + (index + 1) + ". " + esc(question.q) + "</p>" +
+        "<div class='row'><button class='act small mark' data-ok='1'>对</button>" +
+        "<button class='act small mark' data-ok='0'>错</button></div>" +
+        "<div class='answer' hidden>答案：" + esc(question.a) + "</div></div>";
+    });
+  });
+  $("#quiz-stat").textContent = stats.join(" · ");
+  box.innerHTML = html;
+  renderReview(data.review);
+}
+
+async function loadQuiz() {
+  var data = await api("/api/quiz");
+  localAnswers = {};
+  renderQuiz(data);
+}
+
+async function submitGrade() {
+  var keys = Object.keys(localAnswers);
+  if (!keys.length) { toast("先点几道题的对 / 错", true); return; }
+  var results = keys.map(function (key) {
+    var parts = key.split(":");
+    return { claim_id: parts[0], q: parseInt(parts[1], 10) + 1, ok: localAnswers[key] };
+  });
+  var data = await api("/api/grade", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ results: results })
+  });
+  renderReview(data.review);
+  toast("已记录 " + results.length + " 题");
+}
+
+async function loadQuizExample() {
+  var response = await fetch("/api/quiz-example");
+  if (!response.ok) { throw new Error("没有示例题"); }
+  $("#quiz-input").value = await response.text();
+  toast("示例题已填入，点「载入自测题」");
+}
+
+document.addEventListener("click", function (event) {
+  var button = event.target.closest(".mark");
+  if (!button) { return; }
+  var card = button.closest(".qcard");
+  var key = card.getAttribute("data-key");
+  var ok = button.getAttribute("data-ok") === "1";
+  localAnswers[key] = ok;
+  card.querySelectorAll(".mark").forEach(function (item) {
+    item.classList.remove("chosen-ok", "chosen-bad");
+  });
+  button.classList.add(ok ? "chosen-ok" : "chosen-bad");
+});
+
 document.querySelectorAll("nav button").forEach(function (button) {
   button.addEventListener("click", function () {
     document.querySelectorAll("nav button").forEach(function (item) { item.classList.remove("active"); });
     button.classList.add("active");
-    ["corpus", "check", "report"].forEach(function (name) {
+    ["corpus", "check", "report", "quiz"].forEach(function (name) {
       $("#tab-" + name).hidden = name !== button.dataset.tab;
     });
+    if (button.dataset.tab === "quiz") {
+      loadQuiz().catch(function (error) { toast(error.message, true); });
+    }
   });
 });
 
@@ -260,6 +384,31 @@ $("#run-report").addEventListener("click", function () {
 });
 
 $("#download").addEventListener("click", downloadReport);
+
+$("#load-quiz").addEventListener("click", function () {
+  var text = $("#quiz-input").value.trim();
+  if (!text) { toast("先贴 quiz.json", true); return; }
+  api("/api/quiz", { method: "POST", body: text }).then(function (data) {
+    localAnswers = {};
+    renderQuiz(data);
+    toast("自测题已载入");
+  }).catch(function (error) { toast(error.message, true); });
+});
+
+$("#quiz-example").addEventListener("click", function () {
+  loadQuizExample().catch(function (error) { toast(error.message, true); });
+});
+
+$("#toggle-answers").addEventListener("click", function () {
+  var nodes = document.querySelectorAll("#quiz-result .answer");
+  if (!nodes.length) { return; }
+  var show = nodes[0].hidden;
+  nodes.forEach(function (node) { node.hidden = !show; });
+});
+
+$("#submit-grade").addEventListener("click", function () {
+  submitGrade().catch(function (error) { toast(error.message, true); });
+});
 
 refresh().catch(function (error) { toast(error.message, true); });
 </script>

@@ -29,9 +29,13 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True)
         self.corpus_path = self.root / "corpus.json"
         self.ledger_path = self.root / "ledger.json"
+        self.quiz_path = self.root / "quiz.json"
+        self.mistakes_path = self.root / "mistakes.json"
         self.lock = threading.Lock()
         self.corpus = self._load(self.corpus_path) or {"schema": ledger.CORPUS_SCHEMA, "papers": []}
         self.ledger = self._load(self.ledger_path)
+        self.quiz = self._load(self.quiz_path)
+        self.mistakes = self._load(self.mistakes_path)
 
     @staticmethod
     def _load(path):
@@ -44,9 +48,13 @@ class Store:
     def _save(path, document):
         path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _drop_ledger(self):
+    def _reset_derived(self):
         self.ledger = None
+        self.quiz = None
+        self.mistakes = None
         self.ledger_path.unlink(missing_ok=True)
+        self.quiz_path.unlink(missing_ok=True)
+        self.mistakes_path.unlink(missing_ok=True)
 
     def state(self):
         papers = []
@@ -63,6 +71,7 @@ class Store:
             "papers": papers,
             "questions": sum(len(paper["questions"]) for paper in papers),
             "has_ledger": bool(self.ledger),
+            "has_quiz": bool(self.quiz),
             "summary": (self.ledger or {}).get("summary"),
             "version": ledger.VERSION,
         }
@@ -71,7 +80,7 @@ class Store:
         with self.lock:
             self.corpus = {"schema": ledger.CORPUS_SCHEMA, "papers": []}
             self._save(self.corpus_path, self.corpus)
-            self._drop_ledger()
+            self._reset_derived()
         return self.state()
 
     def upload(self, name, data):
@@ -91,7 +100,7 @@ class Store:
             papers.sort(key=lambda item: str(item["paper_id"]))
             self.corpus = {"schema": ledger.CORPUS_SCHEMA, "papers": papers}
             self._save(self.corpus_path, self.corpus)
-            self._drop_ledger()
+            self._reset_derived()
         return self.state()
 
     def demo(self):
@@ -103,7 +112,7 @@ class Store:
         with self.lock:
             self.corpus = {"schema": ledger.CORPUS_SCHEMA, "papers": papers}
             self._save(self.corpus_path, self.corpus)
-            self._drop_ledger()
+            self._reset_derived()
         return {"state": self.state(), "claims": claims_text}
 
     def check(self, text):
@@ -202,6 +211,95 @@ class Store:
         }
 
 
+    def _verified(self):
+        return {
+            claim["id"]: claim
+            for claim in (self.ledger or {}).get("claims") or []
+            if claim.get("status") == "verified"
+        }
+
+    def review_view(self):
+        if not self.ledger:
+            raise ValueError("先对账，才有重测清单")
+        rank = ledger.build_rank(self.ledger.get("claims") or [], top=20, must_pct=30, under_pct=40)
+        plan = ledger.review_plan(rank["rows"], (self.mistakes or {}).get("items") or [])
+        rows = []
+        for row in plan["rows"]:
+            rows.append({
+                "point": row["point"],
+                "tier": row["tier"],
+                "refs": "; ".join("%s#%s" % (ref["paper"], ref["no"]) for ref in row["refs"]),
+                "wrong": row["wrong"],
+                "right": row["right"],
+                "priority": ledger.fmt_num(round(row["priority"], 2)),
+            })
+        untested = [
+            {
+                "point": row["point"],
+                "refs": "; ".join("%s#%s" % (ref["paper"], ref["no"]) for ref in row["refs"]),
+            }
+            for row in plan["untested"]
+        ]
+        return {
+            "rows": rows,
+            "untested": untested,
+            "wrong_points": plan["wrong_points"],
+            "measured_points": plan["measured_points"],
+            "markdown": ledger.render_review(plan),
+        }
+
+    def quiz_view(self):
+        if not self.ledger:
+            raise ValueError("先对账，才能出自测题")
+        document = self.quiz
+        if not document:
+            return {"quizzes": [], "review": self.review_view(), "markdown": ""}
+        points = {cid: claim["point"] for cid, claim in self._verified().items()}
+        markdown = ledger.render_sheet(document, points)
+        quizzes = []
+        for item in document.get("quizzes") or []:
+            quizzes.append({
+                "claim_id": item["claim_id"],
+                "point": points.get(item["claim_id"], ""),
+                "questions": [
+                    {"q": question["q"], "a": question["a"]}
+                    for question in item.get("questions") or []
+                ],
+            })
+        return {"quizzes": quizzes, "review": self.review_view(), "markdown": markdown}
+
+    def set_quiz(self, text):
+        if not self.ledger:
+            raise ValueError("先对账，才能出自测题")
+        try:
+            document = json.loads(text)
+        except ValueError as exc:
+            raise ValueError("quiz.json 不是合法 JSON: %s" % exc)
+        if not isinstance(document, dict) or not isinstance(document.get("quizzes"), list):
+            raise ValueError("quiz.json 必须有 quizzes 数组")
+        points = {cid: claim["point"] for cid, claim in self._verified().items()}
+        ledger.render_sheet(document, points)
+        with self.lock:
+            self.quiz = document
+            self._save(self.quiz_path, document)
+        return self.quiz_view()
+
+    def grade(self, payload):
+        if not self.ledger:
+            raise ValueError("先对账，才能记成绩")
+        results = payload.get("results") or []
+        if not results:
+            raise ValueError("没有提交任何结果")
+        previous = self.mistakes or {"items": []}
+        items = ledger.grade_results(self._verified(), results, previous)
+        ordered = sorted(items.values(), key=lambda item: (-item["wrong"], -item["right"], item["point"]))
+        document = {"schema": ledger.MISTAKES_SCHEMA, "generated_at": ledger.now(), "items": ordered}
+        with self.lock:
+            self.mistakes = document
+            self._save(self.mistakes_path, document)
+        return {"mistakes": document, "review": self.review_view()}
+
+
 class Handler(BaseHTTPRequestHandler):
     store = None
 
@@ -212,6 +310,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_file(WEB_FILE, "text/html; charset=utf-8")
             elif path == "/api/state":
                 self._send_json(self.store.state())
+            elif path == "/api/quiz":
+                self._send_json(self.store.quiz_view())
+            elif path == "/api/review":
+                self._send_json(self.store.review_view())
+            elif path == "/api/quiz-example":
+                self._send_text(ROOT / "examples" / "quiz.json")
             else:
                 self._send_json({"error": "抓到一条不存在的请求"}, 404)
         except Exception as exc:
@@ -230,6 +334,13 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_body()
                 options = json.loads(body) if body else {}
                 self._send_json(self.store.report(int(options.get("top") or 20)))
+            elif path == "/api/quiz":
+                self._send_json(self.store.set_quiz(self._read_body().decode("utf-8", "ignore")))
+            elif path == "/api/grade":
+                body = self._read_body()
+                self._send_json(self.store.grade(json.loads(body) if body else {}))
+            elif path == "/api/review":
+                self._send_json(self.store.review_view())
             elif path == "/api/clear":
                 self._send_json(self.store.clear())
             elif path == "/api/demo":
@@ -251,6 +362,19 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.dumps(document, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _send_text(self, path):
+        try:
+            payload = path.read_text(encoding="utf-8").encode("utf-8")
+        except OSError:
+            self._send_json({"error": "找不到示例题"}, 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
