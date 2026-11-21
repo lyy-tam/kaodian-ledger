@@ -1,5 +1,7 @@
 # 考点账本 · kaodian-ledger
 
+[中文](README.md) | [English](README.en.md)
+
 [![test](https://github.com/lyy-tam/kaodian-ledger/actions/workflows/test.yml/badge.svg)](https://github.com/lyy-tam/kaodian-ledger/actions/workflows/test.yml)
 
 AI 划重点最大的风险不是漏，是编。没有出处的「高频考点」，你没法查，只能信。
@@ -51,7 +53,7 @@ flowchart LR
 | calibrate | 命中率低于阈值（默认 70%）→ 整体降级为「仅参考」 |
 | sheet | 自测题渲染成闭卷题面，答案单独放最后一页 |
 | coverage | 模考后算预测覆盖率；没覆盖的会标出当初在不在存疑区 |
-| serve | 本地网页版：题库 / 对账 / 出表三页签，零依赖 |
+| serve | 本地网页版：题库 / 对账 / 出表 / 自测四页签，零依赖 |
 | grade | 自测结果回写 mistakes.json，重复跑会累加 |
 | review | 按「分值 × (1 + 错次)」出重测清单，没测过的必背项单列 |
 
@@ -187,7 +189,7 @@ sheet 做完，把每题结果记成 results.json：
 prompt 谁都能复制。这个仓库真正带不走的是两个 JSON：corpus.json（你本地的题库）
 和 ledger.json（每条结论的校验记录）。前者是版权边界，后者是可复算的账。
 
-路线图见 [ROADMAP.md](ROADMAP.md)：v0.3 解决喂料门槛（PDF / 整卷粘贴），v0.4 做错题回写；
+路线图见 [ROADMAP.md](ROADMAP.md)：下一步是内容完整性（答案字段、文本型 PDF）；
 向量检索不在计划里，理由写在里面。
 
 MIT License
