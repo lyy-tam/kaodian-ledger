@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>考点账本 · 本地版</title>
+<style>
+  :root {
+    --bg: #0f1318; --panel: #171d24; --line: #26303a; --text: #e7eef5;
+    --muted: #8b98a6; --accent: #4c8dff; --ok: #37c26a; --warn: #e2a53a; --bad: #f0564a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+  header { padding: 18px 16px 8px; }
+  h1 { margin: 0; font-size: 22px; }
+  .sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 8px; padding: 10px 16px; position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  nav button { flex: 1; padding: 10px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--muted); font-size: 15px; }
+  nav button.active { border-color: var(--accent); color: var(--text); background: #1b2636; }
+  main { padding: 0 16px 40px; }
+  section { padding-top: 6px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  button.act { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.ghost { color: var(--muted); }
+  label.file { display: inline-block; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); }
+  label.file input { display: none; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .stat { font-size: 14px; color: var(--muted); margin: 8px 0; }
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+  summary { cursor: pointer; }
+  .tablewrap { overflow-x: auto; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+  tr.suspect td { background: #2a1a1a; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .badge.ok { color: var(--ok); border-color: #24503a; }
+  .badge.bad { color: var(--bad); border-color: #5a2a26; }
+  .badge.warn { color: var(--warn); border-color: #5a462a; }
+  textarea { width: 100%; min-height: 150px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font: 13px/1.5 ui-monospace, monospace; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #223042; color: var(--text); padding: 10px 16px; border-radius: 10px; opacity: 0; pointer-events: none; transition: opacity .2s; font-size: 14px; max-width: 86vw; }
+  #toast.show { opacity: 1; }
+  #toast.bad { background: #4a2320; }
+  h2 { font-size: 16px; margin: 16px 0 6px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>考点账本</h1>
+  <p class="sub">本地版 · 数据只写在这台机器上 · 不上传、不联网</p>
+</header>
+<nav>
+  <button data-tab="corpus" class="active">题库</button>
+  <button data-tab="check">对账</button>
+  <button data-tab="report">出表</button>
+</nav>
+<main>
+  <section id="tab-corpus">
+    <div class="row">
+      <label class="file">上传 .docx / .txt<input type="file" id="file" multiple accept=".docx,.txt,.md"></label>
+      <button class="act" id="demo">加载示例</button>
+      <button class="act ghost" id="clear">清空</button>
+    </div>
+    <p class="hint">支持 Word 文档（自动补题号）和纯文本；同名卷会覆盖。parse 完先看题数。</p>
+    <div class="stat" id="stat">加载中…</div>
+    <div id="papers"></div>
+  </section>
+
+  <section id="tab-check" hidden>
+    <p class="hint">把模型输出的 claims.json 贴进来，每条结论要带 卷号/年份 + 题号 + 原题摘录。</p>
+    <textarea id="claims" placeholder='{"claims": [{"id": "c1", "point": "知识点", "paper": "P1", "no": "一.1", "quote": "原题摘录"}]}'></textarea>
+    <div class="row">
+      <button class="act primary" id="run-check">对账</button>
+      <button class="act" id="use-demo">填入示例结论</button>
+    </div>
+    <div id="check-result"></div>
+  </section>
+
+  <section id="tab-report" hidden>
+    <div class="row">
+      <button class="act primary" id="run-report">生成表</button>
+      <button class="act" id="download">下载 markdown</button>
+    </div>
+    <p class="hint">只统计已经核实出处的结论；存疑区不进表。</p>
+    <div id="report-result"></div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+var reportMarkdown = "";
+
+function $(selector) { return document.querySelector(selector); }
+
+function esc(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+var toastTimer = null;
+function toast(message, bad) {
+  var node = $("#toast");
+  node.textContent = message;
+  node.className = "show" + (bad ? " bad" : "");
+  if (toastTimer) { clearTimeout(toastTimer); }
+  toastTimer = setTimeout(function () { node.className = ""; }, 2600);
+}
+
+async function api(path, options) {
+  var response = await fetch(path, options || {});
+  var data = null;
+  try { data = await response.json(); } catch (error) { data = null; }
+  if (!response.ok) {
+    throw new Error((data && data.error) || ("请求失败 " + response.status));
+  }
+  return data;
+}
+
+function renderState(state) {
+  $("#stat").textContent = state.papers.length + " 卷 / " + state.questions + " 题" +
+    (state.has_ledger ? " · 已对账" : "");
+  var box = $("#papers");
+  if (!state.papers.length) {
+    box.innerHTML = "<p class='empty'>题库是空的。上传 .docx，或点「加载示例」看流程。</p>";
+    return;
+  }
+  box.innerHTML = state.papers.map(function (paper) {
+    var rows = paper.questions.map(function (question) {
+      return "<tr><td>" + esc(question.no) + "</td><td>" + esc(question.score == null ? "-" : question.score) +
+        "</td><td>" + esc(question.text) + "</td></tr>";
+    }).join("");
+    return "<details><summary>" + esc(paper.paper_id) + " · " + paper.questions.length + " 题</summary>" +
+      "<div class='tablewrap'><table><thead><tr><th>题号</th><th>分</th><th>题干</th></tr></thead><tbody>" +
+      rows + "</tbody></table></div></details>";
+  }).join("");
+}
+
+async function refresh() {
+  var state = await api("/api/state");
+  renderState(state);
+  return state;
+}
+
+async function uploadFiles(files) {
+  if (!files.length) { return; }
+  for (var index = 0; index < files.length; index += 1) {
+    var file = files[index];
+    await api("/api/upload?name=" + encodeURIComponent(file.name), { method: "POST", body: file });
+  }
+  await refresh();
+  toast("已入库 " + files.length + " 个文件");
+}
+
+async function loadDemo() {
+  var data = await api("/api/demo", { method: "POST" });
+  renderState(data.state);
+  $("#claims").value = data.claims;
+  toast("示例已载入，去「对账」页点一下");
+}
+
+async function runCheck() {
+  var text = $("#claims").value.trim();
+  if (!text) { toast("先贴 claims.json", true); return; }
+  var data = await api("/api/check", { method: "POST", body: text });
+  var summary = data.summary;
+  var html = "<div class='badges'>" +
+    "<span class='badge ok'>可核实 " + summary.claims_verified + "</span>" +
+    "<span class='badge bad'>存疑 " + summary.claims_suspect + "</span>" +
+    "<span class='badge warn'>材料中未见 " + summary.absent + "</span></div>";
+  html += "<div class='tablewrap'><table><thead><tr><th>结论</th><th>出处</th><th>摘录</th><th>结果</th><th>原因</th></tr></thead><tbody>";
+  html += data.claims.map(function (claim) {
+    return "<tr class='" + (claim.status === "verified" ? "" : "suspect") + "'><td>" + esc(claim.point) +
+      "</td><td>" + esc(claim.ref) + "</td><td>" + esc(claim.quote) + "</td><td>" +
+      (claim.status === "verified" ? "可核实" : "存疑") + "</td><td>" + esc(claim.reasons.join("；")) + "</td></tr>";
+  }).join("");
+  html += data.absent.map(function (item) {
+    return "<tr class='suspect'><td>" + esc(item.point) + "</td><td>-</td><td>-</td><td>存疑</td><td>" +
+      esc(item.note) + "</td></tr>";
+  }).join("");
+  html += "</tbody></table></div>";
+  $("#check-result").innerHTML = html;
+  toast("对账完成：可核实 " + summary.claims_verified + " 条");
+}
+
+async function runReport() {
+  var data = await api("/api/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ top: 20 })
+  });
+  reportMarkdown = data.markdown;
+  var html = "<div class='badges'><span class='badge ok'>Top " + data.rows.length + "</span>" +
+    "<span class='badge'>必背 " + data.must + "</span><span class='badge'>理解 " + data.under + "</span></div>";
+  if (!data.rows.length) {
+    $("#report-result").innerHTML = "<p class='empty'>没有可核实的结论。先去「对账」页。</p>";
+    return;
+  }
+  html += "<div class='tablewrap'><table><thead><tr><th>#</th><th>档</th><th>知识点</th><th>出处</th><th>摘录</th><th>分值</th></tr></thead><tbody>";
+  html += data.rows.map(function (row) {
+    return "<tr><td>" + row.rank + "</td><td>" + esc(row.tier) + "</td><td>" + esc(row.point) +
+      "</td><td>" + esc(row.refs) + "</td><td>" + esc(row.quotes) + "</td><td>" + esc(row.score) + "</td></tr>";
+  }).join("");
+  html += "</tbody></table></div>";
+  $("#report-result").innerHTML = html;
+  toast("表已生成");
+}
+
+function downloadReport() {
+  if (!reportMarkdown) { toast("先出表", true); return; }
+  var blob = new Blob([reportMarkdown], { type: "text/markdown;charset=utf-8" });
+  var url = URL.createObjectURL(blob);
+  var link = document.createElement("a");
+  link.href = url;
+  link.download = "report.md";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+document.querySelectorAll("nav button").forEach(function (button) {
+  button.addEventListener("click", function () {
+    document.querySelectorAll("nav button").forEach(function (item) { item.classList.remove("active"); });
+    button.classList.add("active");
+    ["corpus", "check", "report"].forEach(function (name) {
+      $("#tab-" + name).hidden = name !== button.dataset.tab;
+    });
+  });
+});
+
+$("#file").addEventListener("change", function (event) {
+  uploadFiles(Array.prototype.slice.call(event.target.files)).catch(function (error) { toast(error.message, true); });
+  event.target.value = "";
+});
+
+$("#demo").addEventListener("click", function () {
+  loadDemo().catch(function (error) { toast(error.message, true); });
+});
+
+$("#clear").addEventListener("click", function () {
+  api("/api/clear", { method: "POST" }).then(refresh).then(function () {
+    $("#check-result").innerHTML = "";
+    $("#report-result").innerHTML = "";
+    toast("已清空");
+  }).catch(function (error) { toast(error.message, true); });
+});
+
+$("#run-check").addEventListener("click", function () {
+  runCheck().catch(function (error) { toast(error.message, true); });
+});
+
+$("#use-demo").addEventListener("click", function () {
+  loadDemo().catch(function (error) { toast(error.message, true); });
+});
+
+$("#run-report").addEventListener("click", function () {
+  runReport().catch(function (error) { toast(error.message, true); });
+});
+
+$("#download").addEventListener("click", downloadReport);
+
+refresh().catch(function (error) { toast(error.message, true); });
+</script>
+</body>
+</html>

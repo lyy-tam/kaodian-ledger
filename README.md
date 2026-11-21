@@ -51,6 +51,7 @@ flowchart LR
 | calibrate | 命中率低于阈值（默认 70%）→ 整体降级为「仅参考」 |
 | sheet | 自测题渲染成闭卷题面，答案单独放最后一页 |
 | coverage | 模考后算预测覆盖率；没覆盖的会标出当初在不在存疑区 |
+| serve | 本地网页版：题库 / 对账 / 出表三页签，零依赖 |
 | grade | 自测结果回写 mistakes.json，重复跑会累加 |
 | review | 按「分值 × (1 + 错次)」出重测清单，没测过的必背项单列 |
 
@@ -80,6 +81,20 @@ flowchart LR
 
     # 7. 模考后：实际考点按 examples/actual-mock.json 的格式写下来
     python3 ledger.py coverage out/ledger.json --actual examples/actual-mock.json --aliases examples/aliases.json --md out/coverage.md --out out/coverage.json
+
+## 网页版（不想敲命令）
+
+    python3 serve.py
+    # 手机或电脑浏览器打开 http://127.0.0.1:8000
+
+三个页签：
+
+- 题库：上传 .docx / .txt，或者点「加载示例」，看切出来的题和分值
+- 对账：贴 claims.json，存疑区标红，原因写清楚
+- 出表：Top N + 三档，可下载 markdown
+
+数据只写在本机 data/ 目录，不联网、不上传。默认只绑 127.0.0.1；
+要让同网段设备访问才加 --host 0.0.0.0（有风险，自己想清楚）。
 
 ## 怎么把真题喂进去
 
