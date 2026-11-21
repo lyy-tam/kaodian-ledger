@@ -111,7 +111,7 @@ In order of convenience:
 1. Word: drop .docx files into a directory and parse. Questions numbered by Word's
    auto-numbering (invisible in the text) get 一.1 / 二.1 style numbers per section;
    legacy .doc must be re-saved as .docx.
-2. Paste: plain text in the format from SPEC.md, one paper per .txt, numbers at line start ([1] or 1.).
+2. Paste: plain text in the format from [SPEC.en.md](SPEC.en.md), one paper per .txt, numbers at line start ([1] or 1.).
 3. Photo OCR: shoot pages straight and one per image, then convert to text; skip this for formula-heavy subjects.
 4. Existing CSV: a sheet with year, number, stem, score, point, quote columns goes straight into import-csv.
 
