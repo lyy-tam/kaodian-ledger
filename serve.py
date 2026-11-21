@@ -166,8 +166,12 @@ class Store:
         with self.lock:
             self.ledger = document_out
             self._save(self.ledger_path, document_out)
+        return self._check_view()
+
+    def _check_view(self):
+        document = self.ledger or {}
         return {
-            "summary": document_out["summary"],
+            "summary": document.get("summary") or {},
             "claims": [
                 {
                     "id": claim["id"],
@@ -178,10 +182,15 @@ class Store:
                     "reasons": [ledger.REASON_TEXT.get(reason, reason) for reason in claim["reasons"]],
                     "warnings": [warning["code"] for warning in claim["warnings"]],
                 }
-                for claim in checked
+                for claim in document.get("claims") or []
             ],
-            "absent": absent,
+            "absent": document.get("absent") or [],
         }
+
+    def last_check(self):
+        if not self.ledger:
+            return {"need_ledger": True, "summary": {}, "claims": [], "absent": []}
+        return self._check_view()
 
     def report(self, top):
         if not self.ledger:
@@ -319,6 +328,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(self.store.state())
             elif path == "/api/quiz":
                 self._send_json(self.store.quiz_view())
+            elif path == "/api/check":
+                self._send_json(self.store.last_check())
             elif path == "/api/review":
                 self._send_json(self.store.review_view())
             elif path == "/api/quiz-example":

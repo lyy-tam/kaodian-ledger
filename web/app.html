@@ -184,10 +184,11 @@ async function loadDemo() {
   toast("示例已载入，去「对账」页点一下");
 }
 
-async function runCheck() {
-  var text = $("#claims").value.trim();
-  if (!text) { toast("先贴 claims.json", true); return; }
-  var data = await api("/api/check", { method: "POST", body: text });
+function renderCheck(data) {
+  if (!data || data.need_ledger) {
+    $("#check-result").innerHTML = "<p class='empty'>还没有对账记录。把 claims.json 贴进框里，点「对账」。</p>";
+    return;
+  }
   var summary = data.summary;
   var html = "<div class='badges'>" +
     "<span class='badge ok'>可核实 " + summary.claims_verified + "</span>" +
@@ -205,7 +206,49 @@ async function runCheck() {
   }).join("");
   html += "</tbody></table></div>";
   $("#check-result").innerHTML = html;
-  toast("对账完成：可核实 " + summary.claims_verified + " 条");
+}
+
+async function runCheck() {
+  var text = $("#claims").value.trim();
+  if (!text) { toast("先贴 claims.json", true); return; }
+  var data = await api("/api/check", { method: "POST", body: text });
+  renderCheck(data);
+  toast("对账完成：可核实 " + data.summary.claims_verified + " 条");
+}
+
+async function loadLastCheck() {
+  var data = await api("/api/check");
+  renderCheck(data);
+}
+
+async function loadLastReport() {
+  try {
+    var data = await api("/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ top: 20 })
+    });
+    renderReport(data);
+  } catch (error) {
+    $("#report-result").innerHTML = "<p class='empty'>还没有可出的表。先去「对账」页。</p>";
+  }
+}
+
+function renderReport(data) {
+  reportMarkdown = data.markdown || "";
+  if (!data.rows.length) {
+    $("#report-result").innerHTML = "<p class='empty'>没有可核实的结论。先去「对账」页。</p>";
+    return;
+  }
+  var html = "<div class='badges'><span class='badge ok'>Top " + data.rows.length + "</span>" +
+    "<span class='badge'>必背 " + data.must + "</span><span class='badge'>理解 " + data.under + "</span></div>";
+  html += "<div class='tablewrap'><table><thead><tr><th>#</th><th>档</th><th>知识点</th><th>出处</th><th>摘录</th><th>分值</th></tr></thead><tbody>";
+  html += data.rows.map(function (row) {
+    return "<tr><td>" + row.rank + "</td><td>" + esc(row.tier) + "</td><td>" + esc(row.point) +
+      "</td><td>" + esc(row.refs) + "</td><td>" + esc(row.quotes) + "</td><td>" + esc(row.score) + "</td></tr>";
+  }).join("");
+  html += "</tbody></table></div>";
+  $("#report-result").innerHTML = html;
 }
 
 async function runReport() {
@@ -214,20 +257,7 @@ async function runReport() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ top: 20 })
   });
-  reportMarkdown = data.markdown;
-  var html = "<div class='badges'><span class='badge ok'>Top " + data.rows.length + "</span>" +
-    "<span class='badge'>必背 " + data.must + "</span><span class='badge'>理解 " + data.under + "</span></div>";
-  if (!data.rows.length) {
-    $("#report-result").innerHTML = "<p class='empty'>没有可核实的结论。先去「对账」页。</p>";
-    return;
-  }
-  html += "<div class='tablewrap'><table><thead><tr><th>#</th><th>档</th><th>知识点</th><th>出处</th><th>摘录</th><th>分值</th></tr></thead><tbody>";
-  html += data.rows.map(function (row) {
-    return "<tr><td>" + row.rank + "</td><td>" + esc(row.tier) + "</td><td>" + esc(row.point) +
-      "</td><td>" + esc(row.refs) + "</td><td>" + esc(row.quotes) + "</td><td>" + esc(row.score) + "</td></tr>";
-  }).join("");
-  html += "</tbody></table></div>";
-  $("#report-result").innerHTML = html;
+  renderReport(data);
   toast("表已生成");
 }
 
@@ -355,6 +385,12 @@ document.querySelectorAll("nav button").forEach(function (button) {
     ["corpus", "check", "report", "quiz"].forEach(function (name) {
       $("#tab-" + name).hidden = name !== button.dataset.tab;
     });
+    if (button.dataset.tab === "check") {
+      loadLastCheck().catch(function (error) { toast(error.message, true); });
+    }
+    if (button.dataset.tab === "report") {
+      loadLastReport().catch(function (error) { toast(error.message, true); });
+    }
     if (button.dataset.tab === "quiz") {
       loadQuiz().catch(function (error) { toast(error.message, true); });
     }

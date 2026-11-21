@@ -84,6 +84,8 @@ flowchart LR
 
 ## 网页版（不想敲命令）
 
+![演示：题库 → 对账 → 出表 → 自测](docs/demo.gif)
+
     python3 serve.py
     # 手机或电脑浏览器打开 http://127.0.0.1:8000
 
