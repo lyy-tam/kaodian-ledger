@@ -23,6 +23,13 @@ No model memory, no copyrighted exam papers: the repository ships none, only fic
 **Who it is for:** people who already have two or more past papers and have been burned by invented "high-frequency" topics.
 **Who it is not for:** people with no corpus who want ready-made highlights — this tool provides no exam content, it only verifies what you feed it.
 
+## Design principles
+
+- **No citation, no point.** A sentence produced by a model must be findable in the papers you supplied; if it is not, it goes to the doubt list.
+- **No model inside.** The tool calls no API and makes no network request; extraction happens outside, on your side. Boundary: whatever you paste into a model is outside this tool's control.
+- **Only what produces a result.** Ledger, check, report, quiz. No chatbot, no vanity dashboard.
+- **Fail loudly, never guess.** If a paper cannot be parsed, stop. A mis-split paper poisons the whole ledger — worse than having none.
+
 ## The seven steps, as commands
 
 ```mermaid
