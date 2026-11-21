@@ -98,6 +98,15 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(result["status"], "verified")
         self.assertIn("quote_too_long", [w["code"] for w in result["warnings"]])
 
+    def test_english_quote_uses_longer_limit(self):
+        text = "@paper: E1\n[1] The cell membrane is a bilayer.(2分)\n"
+        index = ledger.build_index({"papers": [ledger.parse_paper_text(text, "E1")]})
+        result = ledger.check_claim(
+            {"id": "c1", "point": "membrane", "paper": "E1", "no": "1",
+             "quote": "cell membrane is a bilayer"}, index)
+        self.assertEqual(result["status"], "verified")
+        self.assertNotIn("quote_too_long", [w["code"] for w in result["warnings"]])
+
     def test_score_mismatch_warns(self):
         result = ledger.check_claim(
             {"id": "c1", "point": "x", "paper": "2023-A", "no": "1",

@@ -1,5 +1,7 @@
 # 抽取提示词（题库型科目）
 
+English version: extract.en.md
+
 把这段和 corpus.json（或分卷的题干文本）一起给模型。输出必须是 claims.json。
 
 ---

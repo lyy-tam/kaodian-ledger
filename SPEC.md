@@ -102,7 +102,7 @@
 
 | 情况 | warning |
 |---|---|
-| 引文 > 10 字 | quote_too_long |
+| 引文超过上限（中文 10 字 / 英文 40 字符） | quote_too_long |
 | 同一引文在题库出现 ≥3 次 | weak_quote |
 | 结论分值和题库不一致 | score_mismatch |
 | 题库没标分值，沿用结论里的 | score_unverified |

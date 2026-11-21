@@ -128,11 +128,12 @@ whole ledger and is hard to notice later.
 
 ## The prompt pack
 
-- prompts/extract.md: use only the supplied material; every claim needs a verbatim quote and a question number; anything unverifiable goes to absent.
-- prompts/quiz.md: two closed-book questions per must-know item, one recall and one transfer; answers kept apart from the questions.
-- prompts/capability-mode.md: for skill-type subjects, analyse question forms instead of betting on topics.
+- prompts/extract.en.md: use only the supplied material; every claim needs a verbatim quote and a question number; anything unverifiable goes to absent.
+- prompts/quiz.en.md: two closed-book questions per must-know item, one recall and one transfer; answers kept apart from the questions.
+- prompts/capability-mode.en.md: for skill-type subjects, analyse question forms instead of betting on topics.
 
-All three are paste-and-go prompts and are not tied to a specific model.
+All three are paste-and-go prompts and are not tied to a specific model. Chinese originals:
+extract.md, quiz.md, capability-mode.md.
 
 ## Example output
 
@@ -191,6 +192,7 @@ now every quote that does not match its stem lands in the doubt list.
 - Merging is literal plus aliases.json; without an entry, "milk foam temperature" and "foam temperature" are counted separately.
 - A mis-split by OCR pollutes the ledger. Check the question count after parse.
 - Missing scores are estimated from the median of known scores in the same paper and marked "est".
+- The long-quote warning uses 10 CJK characters or 40 Latin characters; it is advisory, not a failure.
 - For skill-type subjects (programming, writing, experiment design) probabilities are meaningless; use prompts/capability-mode.md for question-form analysis instead.
 - The repository ships no real papers; examples/ is fictional.
 

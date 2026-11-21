@@ -125,7 +125,8 @@ parse 完先看题数——切错题会污染整个账本，而且很难自动�
 - prompts/quiz.md：每个必背项 2 道闭卷题，回忆型 + 迁移型，答案和题面分开。
 - prompts/capability-mode.md：能力型科目换成题型分析，不押知识点、不给概率。
 
-三份都是「贴进去就能用」的整段，不绑定特定模型。
+三份都是「贴进去就能用」的整段，不绑定特定模型。英文版在 prompts/extract.en.md、
+prompts/quiz.en.md、prompts/capability-mode.en.md。
 
 ## 跑出来长什么样
 

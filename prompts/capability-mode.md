@@ -1,5 +1,7 @@
 # 能力型科目：换题型分析，不押知识点
 
+English version: capability-mode.en.md
+
 编程、写作、实验设计、面试这类科目，知识点怎么押都押不中拉分项，概率也没有意义。
 别用 claims.json，换这个。
 

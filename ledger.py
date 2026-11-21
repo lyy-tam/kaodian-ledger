@@ -27,7 +27,7 @@ import zipfile
 from datetime import datetime
 from statistics import median
 
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 
 CORPUS_SCHEMA = "kaodian-ledger/corpus@1"
 LEDGER_SCHEMA = "kaodian-ledger/ledger@1"
@@ -526,7 +526,9 @@ def check_claim(claim, index):
     if not quote_norm:
         result["reasons"].append("empty_quote")
         return result
-    if len(quote) > 10:
+    has_cjk = any(chr(0x4E00) <= ch <= chr(0x9FFF) for ch in quote)
+    limit = 10 if has_cjk else 40
+    if len(quote) > limit:
         result["warnings"].append({"code": "quote_too_long", "detail": len(quote)})
 
     papers = resolve_papers(index, claim)

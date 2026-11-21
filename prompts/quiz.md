@@ -1,5 +1,7 @@
 # 出题提示词
 
+English version: quiz.en.md
+
 输入：report.md 里「必背」档的条目（每条带知识点和出处），最好再附上原题。
 输出：quiz.json。
 
