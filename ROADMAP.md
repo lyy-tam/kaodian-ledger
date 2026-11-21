@@ -1,21 +1,22 @@
 # 路线图
 
+[中文](ROADMAP.md) | [English](ROADMAP.en.md)
+
 一条原则：校验必须是确定性的。任何让模型「回忆」或用相似度打分替代精确匹配的改动，都不做。
 
 ## 现在（v0.7）
 
 十个命令 + 一个本地网页版，覆盖七步方法和一次完整的复习回合：
 
-- serve.py：四页签的本地界面，数据不出机器（v0.6 新增）
-- 自测页签：贴 quiz.json、点对错、出重测清单（v0.7 新增）
-
 - parse / import-csv：入库（.docx / .txt / .md / 旧 CSV）
 - check：出处对账
 - rank：Top N + 三档
 - sample / calibrate：人工校准
-- sheet：闭卷自测
+- sheet：闭卷自测，答案排最后一页
 - grade / review：错题回写、重测清单
 - coverage：模考覆盖率
+- serve.py：四页签的本地界面，数据不出机器（v0.6 新增）
+- 自测页签：贴 quiz.json、点对错、出重测清单（v0.7 新增）
 
 v0.4 完成分节题号与节分值，v0.5 完成 .docx 入库与 Word 自动编号还原。
 

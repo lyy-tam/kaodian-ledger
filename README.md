@@ -190,7 +190,7 @@ sheet 做完，把每题结果记成 results.json：
 prompt 谁都能复制。这个仓库真正带不走的是两个 JSON：corpus.json（你本地的题库）
 和 ledger.json（每条结论的校验记录）。前者是版权边界，后者是可复算的账。
 
-路线图见 [ROADMAP.md](ROADMAP.md)：下一步是内容完整性（答案字段、文本型 PDF）；
+路线图见 [ROADMAP.md](ROADMAP.md)（[English](ROADMAP.en.md)）：下一步是内容完整性（答案字段、文本型 PDF）；
 向量检索不在计划里，理由写在里面。
 
 MIT License

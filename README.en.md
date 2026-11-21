@@ -202,7 +202,8 @@ Anyone can copy a prompt. What cannot be copied out of this repository is two JS
 files: corpus.json (your local question bank) and ledger.json (the verification record
 of every claim). The first is a copyright boundary, the second is an auditable ledger.
 
-Roadmap: see [ROADMAP.md](ROADMAP.md). Next up is content completeness (answer fields,
-text-type PDF). Vector search is explicitly out of scope, for reasons written there.
+Roadmap: see [ROADMAP.en.md](ROADMAP.en.md) (Chinese: [ROADMAP.md](ROADMAP.md)). Next up is
+content completeness (answer fields, text-type PDF). Vector search is explicitly out of
+scope, for reasons written there.
 
 MIT License
