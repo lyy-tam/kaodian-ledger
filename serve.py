@@ -220,7 +220,14 @@ class Store:
 
     def review_view(self):
         if not self.ledger:
-            raise ValueError("先对账，才有重测清单")
+            return {
+                "rows": [],
+                "untested": [],
+                "wrong_points": 0,
+                "measured_points": 0,
+                "markdown": "",
+                "need_ledger": True,
+            }
         rank = ledger.build_rank(self.ledger.get("claims") or [], top=20, must_pct=30, under_pct=40)
         plan = ledger.review_plan(rank["rows"], (self.mistakes or {}).get("items") or [])
         rows = []
@@ -250,7 +257,7 @@ class Store:
 
     def quiz_view(self):
         if not self.ledger:
-            raise ValueError("先对账，才能出自测题")
+            return {"quizzes": [], "review": self.review_view(), "markdown": "", "need_ledger": True}
         document = self.quiz
         if not document:
             return {"quizzes": [], "review": self.review_view(), "markdown": ""}
@@ -318,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_text(ROOT / "examples" / "quiz.json")
             else:
                 self._send_json({"error": "抓到一条不存在的请求"}, 404)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, 400)
         except Exception as exc:
             self._send_json({"error": "服务器错误: %s" % exc}, 500)
 

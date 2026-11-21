@@ -27,7 +27,7 @@ import zipfile
 from datetime import datetime
 from statistics import median
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 
 CORPUS_SCHEMA = "kaodian-ledger/corpus@1"
 LEDGER_SCHEMA = "kaodian-ledger/ledger@1"

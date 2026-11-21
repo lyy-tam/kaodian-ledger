@@ -77,11 +77,13 @@ class QuizTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_requires_ledger(self):
+    def test_without_ledger_returns_empty(self):
         with tempfile.TemporaryDirectory() as folder:
             store = serve.Store(folder)
-            with self.assertRaises(ValueError):
-                store.quiz_view()
+            view = store.quiz_view()
+            self.assertEqual(view["quizzes"], [])
+            self.assertTrue(view["need_ledger"])
+            self.assertTrue(store.review_view()["need_ledger"])
 
     def test_set_quiz_and_grade(self):
         view = self.store.set_quiz(QUIZ)

@@ -250,6 +250,10 @@ function renderReview(data) {
     box.innerHTML = "<p class='empty'>做完题、提交结果后，这里会按错次排重测清单。</p>";
     return;
   }
+  if (data.need_ledger) {
+    box.innerHTML = "<p class='empty'>还没有账本。先去「对账」页跑一遍。</p>";
+    return;
+  }
   var html = "";
   if (data.rows && data.rows.length) {
     html += "<div class='tablewrap'><table><thead><tr><th>知识点</th><th>出处</th><th>错/对</th><th>优先级</th></tr></thead><tbody>";
@@ -274,7 +278,10 @@ function renderQuiz(data) {
   $("#submit-grade").hidden = true;
   $("#quiz-stat").textContent = "";
   if (!data || !data.quizzes || !data.quizzes.length) {
-    box.innerHTML = "<p class='empty'>还没有自测题。先对账，再把 quiz.json 贴进来。</p>";
+    var hint = (data && data.need_ledger)
+      ? "先去「对账」页把 claims.json 跑一遍，再回来出题。"
+      : "还没有自测题。把 quiz.json 贴进来。";
+    box.innerHTML = "<p class='empty'>" + hint + "</p>";
     renderReview(data ? data.review : null);
     return;
   }
